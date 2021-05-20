@@ -1,4 +1,5 @@
 import os
+
 import torch
 import numpy as np
 import torchvision
@@ -6,16 +7,14 @@ import matplotlib.pyplot as plt
 import time
 import copy
 from torchvision import transforms, models
-import transforms as transforms
-from cgi import escape
-from html import escape
+from skimage import io
+
 
 from tqdm import tqdm
 from tkinter import Image
 from torch.utils.data import Dataset
 import pandas as pd  # data processing, CSV file I/O (e.g. pd.read_csv)
 
-from torch.distributions import transforms
 
 from sklearn.model_selection import train_test_split
 
@@ -31,9 +30,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix, classification_report
+
 
 negative_paths = os.listdir('D:\ДИПЛОМ\Проект_1\Снимки экрана\Без телефона')
 positive_paths = os.listdir('D:\ДИПЛОМ\Проект_1\Снимки экрана\С телефоном')
@@ -42,7 +39,6 @@ positive_labels = [1] * len(positive_paths)
 
 negative_paths.extend(positive_paths)
 negative_labels.extend(positive_labels)
-
 
 
 paths = pd.DataFrame(negative_paths, columns=['paths'])
@@ -62,7 +58,7 @@ df.to_csv('awesome_csv.csv', index=False)
 class PathologyPlantsDataset(Dataset):
 
     def __init__(self, data_frame, root_dir, transform=None):
-        self.data_frame = data_frame
+        self.data_frame = pd.read_csv(data_frame)
         self.root_dir = root_dir
         self.transform = transform
 
@@ -75,10 +71,14 @@ class PathologyPlantsDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        img_name = os.path.join(self.root_dir, self.data_frame.iloc[idx, 1])
+        img_name = os.path.join(self.root_dir,
+                                self.data_frame.iloc[idx, 0])
         image = Image.open(img_name)
+        # image = io.imread(img_name)
         label = self.data_frame.iloc[idx, -1]
-
+        # label = np.array([label])
+        # label = label.astype('float').reshape(-1, 1)
+        # sample = {'image': image, 'labels': label}
         if self.transform:
             image = self.transform(image)
 
@@ -87,8 +87,8 @@ class PathologyPlantsDataset(Dataset):
 
 # INSTANTIATE THE OBJECT
 pathology_train = PathologyPlantsDataset(
-    data_frame='D:/ДИПЛОМ/Проект_1/awesome_csv.csv/',
-    root_dir='D:/ДИПЛОМ/Проект_1/',
+    data_frame='D:\ДИПЛОМ\Проект_1\\awesome_csv.csv',
+    root_dir='D:\ДИПЛОМ\Проект_1\\all',
     transform=transforms.Compose({
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
@@ -98,27 +98,11 @@ pathology_train = PathologyPlantsDataset(
 )
 
 
-# увеличивание выборки посредстом изменения фотографий и формирую
-train_transforms = transforms.Compose([
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-])
-
-val_transforms = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-])
-
-train_dataset = torchvision.datasets.ImageFolder(X_train, train_transforms)
-test_dataset = torchvision.datasets.ImageFolder(X_test, val_transforms)
-
 batch_size = 8  # форматирую (привожу к тензорам) информацию для загрузки в нейросеть
 train_dataloader = torch.utils.data.DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=True, num_workers=batch_size)
+    pathology_train, batch_size=batch_size, shuffle=True, num_workers=batch_size)
 val_dataloader = torch.utils.data.DataLoader(
-    val_dataset, batch_size=batch_size, shuffle=False, num_workers=batch_size)
+    pathology_train, batch_size=batch_size, shuffle=False, num_workers=batch_size)
 
 X_batch, y_batch = next(iter(train_dataloader))
 mean = np.array([0.485, 0.456, 0.406])
