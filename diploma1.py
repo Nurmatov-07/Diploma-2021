@@ -1,5 +1,5 @@
 import os
-
+import PIL.Image
 import torch
 import numpy as np
 import torchvision
@@ -46,7 +46,7 @@ labels = pd.DataFrame(negative_labels, columns=['labels'])
 
 df = pd.concat([paths, labels], axis=1)
 df = df.sample(frac=1).reset_index(drop=True)
-print(df.head())
+# print(df.head())
 
 df.to_csv('awesome_csv.csv', index=False)
 
@@ -73,7 +73,7 @@ class PathologyPlantsDataset(Dataset):
 
         img_name = os.path.join(self.root_dir,
                                 self.data_frame.iloc[idx, 0])
-        image = Image.open(img_name)
+        image = PIL.Image.open(img_name).convert('RGB')
         # image = io.imread(img_name)
         label = self.data_frame.iloc[idx, -1]
         # label = np.array([label])
@@ -89,46 +89,36 @@ class PathologyPlantsDataset(Dataset):
 pathology_train = PathologyPlantsDataset(
     data_frame='D:\ДИПЛОМ\Проект_1\\awesome_csv.csv',
     root_dir='D:\ДИПЛОМ\Проект_1\\all',
-    transform=transforms.Compose({
+    transform={
+        'train': transforms.Compose({
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    })
+    }),
+        'val': transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    }
 )
 
 
-batch_size = 8  # форматирую (привожу к тензорам) информацию для загрузки в нейросеть
+batch_size = 6  # форматирую (привожу к тензорам) информацию для загрузки в нейросеть
 train_dataloader = torch.utils.data.DataLoader(
     pathology_train, batch_size=batch_size, shuffle=True, num_workers=batch_size)
 val_dataloader = torch.utils.data.DataLoader(
     pathology_train, batch_size=batch_size, shuffle=False, num_workers=batch_size)
 
-X_batch, y_batch = next(iter(train_dataloader))
-mean = np.array([0.485, 0.456, 0.406])
-std = np.array([0.229, 0.224, 0.225])
-plt.imshow(X_batch[0].permute(1, 2, 0).numpy() * std + mean);
 
+def train_model(model, loss, optimizer, scheduler, num_epochs=25):
+    since = time.time()
 
-def show_input(input_tensor, title=''):
-    image = input_tensor.permute(1, 2, 0).numpy()
-    image = std * image + mean
-    plt.imshow(image.clip(0, 1))
-    plt.title(title)
-    plt.show()
-    plt.pause(0.001)
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_acc = 0.0
 
-
-class_names = ['phones', 'no_phones']
-
-
-X_batch, y_batch = next(iter(train_dataloader))  # подмножество обучающей выборки
-
-for x_item, y_item in zip(X_batch, y_batch):
-    show_input(x_item, title=class_names[y_item])
-
-
-def train_model(model, loss, optimizer, scheduler, num_epochs):
     for epoch in range(num_epochs):
         print('Epoch {}/{}:'.format(epoch, num_epochs - 1), flush=True)
 
@@ -146,17 +136,17 @@ def train_model(model, loss, optimizer, scheduler, num_epochs):
             running_acc = 0.
 
             # Iterate over data.
-            for inputs, labels in tqdm(dataloader):
+            for inputs, labs in tqdm(dataloader):
                 inputs = inputs.to(device)
-                labels = labels.to(device)
+                labs = labs.to(device)
 
                 optimizer.zero_grad()
 
                 # forward and backward
                 with torch.set_grad_enabled(phase == 'train'):
                     preds = model(inputs)
-                    loss_value = loss(preds, labels)
                     preds_class = preds.argmax(dim=1)
+                    loss_value = loss(preds, labs)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -164,35 +154,49 @@ def train_model(model, loss, optimizer, scheduler, num_epochs):
                         optimizer.step()
 
                 # statistics
-                running_loss += loss_value.item()
-                running_acc += (preds_class == labels.data).float().mean()
+                running_loss += loss_value.item() * inputs.size(0)
+                running_acc += (preds_class == labs.data).float().mean()
+            if phase == 'train':
+                scheduler.step()
 
             epoch_loss = running_loss / len(dataloader)
             epoch_acc = running_acc / len(dataloader)
 
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc), flush=True)
 
+            if phase == 'val' and epoch_acc > best_acc:
+                best_acc = epoch_acc
+                best_model_wts = copy.deepcopy(model.state_dict())
+
+        print()
+
+    time_elapsed = time.time() - since
+    print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+    print('Best val Acc: {:4f}'.format(best_acc))
+
+    model.load_state_dict(best_model_wts)
     return model
 
 
-model = models.resnet50(pretrained=True)
+if __name__ == '__main__':
+    model = models.resnet50(pretrained=True)
 
-# Disable grad for all conv layers
-for param in model.parameters():
-    param.requires_grad = False
+    # Disable grad for all conv layers
+    for param in model.parameters():
+        param.requires_grad = False
 
-model.fc = torch.nn.Linear(model.fc.in_features, 2)
+    model.fc = torch.nn.Linear(model.fc.in_features, 2)
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-model = model.to(device)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
 
-loss = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-3)
+    loss = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-3)
 
-# Decay LR by a factor of 0.1 every 7 epochs
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+    # Decay LR by a factor of 0.1 every 7 epochs
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
-train_model(model, loss, optimizer, scheduler, num_epochs=100);
-
+    model = train_model(model, loss, optimizer, scheduler, num_epochs=25)
+    # visualize(model)
 
 
