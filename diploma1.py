@@ -6,7 +6,7 @@ import torchvision
 import matplotlib.pyplot as plt
 import time
 import copy
-from torchvision import transforms, models
+from torchvision import transforms, models, datasets
 from skimage import io
 
 
@@ -52,7 +52,7 @@ df.to_csv('awesome_csv.csv', index=False)
 
 # X = df.iloc[:, 0: -1]
 # y = df.iloc[:, -1]
-# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=69)
+#X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=69)
 
 
 class PathologyPlantsDataset(Dataset):
@@ -89,28 +89,28 @@ class PathologyPlantsDataset(Dataset):
 pathology_train = PathologyPlantsDataset(
     data_frame='D:\ДИПЛОМ\Проект_1\\awesome_csv.csv',
     root_dir='D:\ДИПЛОМ\Проект_1\\all',
-    transform={
-        'train': transforms.Compose({
+    transform=transforms.Compose({
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    }),
-        'val': transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
-    }
+    })
 )
 
+for i in range(len(pathology_train.data_frame)):
+    image, label = pathology_train.data_frame[i][0], pathology_train.data_frame[i][1]
+
+image_datasets = {x: datasets.(os.path.join(pathology_train.root_dir, x),
+                                          pathology_train.transform[x])
+                    for x in ['train', 'val']}
+
+class_names = pathology_train.root_dir['train'].classes
 
 batch_size = 6  # форматирую (привожу к тензорам) информацию для загрузки в нейросеть
 train_dataloader = torch.utils.data.DataLoader(
     pathology_train, batch_size=batch_size, shuffle=True, num_workers=batch_size)
 val_dataloader = torch.utils.data.DataLoader(
-    pathology_train, batch_size=batch_size, shuffle=False, num_workers=batch_size)
+    pathology_train, batch_size=batch_size, shuffle=True, num_workers=batch_size)
 
 
 def train_model(model, loss, optimizer, scheduler, num_epochs=25):
@@ -178,6 +178,31 @@ def train_model(model, loss, optimizer, scheduler, num_epochs=25):
     return model
 
 
+def visualize_model(model, num_images=40):
+    was_training = model.training
+    model.eval()
+    images_so_far = 0
+    fig = plt.figure()
+
+    with torch.no_grad():
+        for i, (inputs, labs) in enumerate(tqdm(val_dataloader)):
+            inputs = inputs.to(device)
+            labs = labs.to(device)
+
+            preds = model(inputs)
+            preds_class = preds.argmax(dim=1)
+            for j in range(inputs.size()[0]):
+                images_so_far += 1
+                ax = plt.subplot(num_images//2,2, images_so_far)
+                ax.axis('off')
+                ax.set_title('predicted: {}'.format(class_names[preds[j]]))
+
+                if images_so_far == num_images:
+                    model.train(mode=was_training)
+                    return
+        model.train(mode=was_training)
+
+
 if __name__ == '__main__':
     model = models.resnet50(pretrained=True)
 
@@ -197,6 +222,6 @@ if __name__ == '__main__':
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
     model = train_model(model, loss, optimizer, scheduler, num_epochs=25)
-    # visualize(model)
+    visualize_model(model)
 
 
